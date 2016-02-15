@@ -1,0 +1,7 @@
+<VirtualHost *:80>
+  ServerName {{ inventory_hostname }}
+  ServerAdmin {{ admin_mail_address }}
+  DocumentRoot /var/www/piwik-{{ piwik_version }}
+  ErrorLog ${APACHE_LOG_DIR}/error.log
+  CustomLog ${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>

@@ -1,0 +1,133 @@
+---
+- hosts: all
+  become: true
+
+  vars:
+    admin_mail_address: root@local.site
+    mysql_piwik_password: password
+    mysql_root_password: password
+    piwik_version: 2.16.0
+
+  tasks:
+  - name: update package cache and upgrade all packages
+    apt:
+      update_cache: yes
+      upgrade: dist
+
+  - name: install apache2
+    apt: name=apache2 state=latest
+
+  - name: install php packages
+    apt:
+      name: "{{ item }}"
+      state: latest
+    with_items:
+      - php5
+      - php5-curl
+      - php5-mysql
+      - php5-gd
+      - php5-geoip
+      - libapache2-mod-php5
+
+  - name: enable apache2 php5 module
+    apache2_module:
+      state: present
+      name: php5
+
+  - name: install mysql packages
+    apt:
+      name: "{{ item }}"
+      state: latest
+    with_items:
+      - mysql-server
+      - python-mysqldb
+
+  - name: start/enable mysql service
+    service:
+      name: mysql
+      state: started
+      enabled: yes
+
+  - name: set mysql root password
+    mysql_user: 
+      name: root 
+      host: "{{ item }}" 
+      password: "{{ mysql_root_password }}"
+      check_implicit_admin: yes
+      priv: "*.*:ALL,GRANT"
+      login_user: root
+      login_password: "{{ mysql_root_password }}"
+    with_items:
+      - "{{ ansible_hostname }}"
+      - 127.0.0.1
+      - ::1
+      - localhost 
+
+  - name: create piwik database
+    mysql_db:
+      name: piwik
+      state: present
+      login_user: root
+      login_password: "{{ mysql_root_password }}"
+
+  - name: create piwki database user
+    mysql_user:
+      name: piwik
+      password: "{{ mysql_piwik_password }}"
+      priv: piwik.*:ALL
+      state: present
+      login_user: root
+      login_password: "{{ mysql_root_password }}"
+
+  - name: download piwik tarball
+    get_url:
+      url: https://github.com/piwik/piwik/archive/{{ piwik_version }}.tar.gz
+      dest: /tmp/{{ piwik_version }}.tar.gz
+      mode: 0644
+
+  - name: extract piwik source files
+    unarchive:
+      src: /tmp/{{ piwik_version }}.tar.gz
+#      only supported in ansible >= 2.0
+#      src: https://github.com/piwik/piwik/archive/{{ piwik_version }}.tar.gz
+      copy: no
+      dest: /var/www
+
+  - name: download composer installer
+    get_url:
+      url: https://getcomposer.org/installer
+      dest: /tmp/installer
+      mode: 0644
+
+  - name: install composer
+    command: php /tmp/installer --install-dir=/usr/local/bin --filename=composer
+
+  - name: download/install all libs and dependencies of piwik
+    composer:
+      command: install
+      working_dir: /var/www/piwik-{{ piwik_version }}
+
+  - name: set correct ownership for /var/www/piwik-a.b.c
+    file:
+      path: /var/www/piwik-{{ piwik_version }}
+      owner: www-data
+      group: www-data
+      recurse: yes
+
+  - name: copy apache2 configuration file
+    template:
+      src: templates/000-default.conf.j2
+      dest: /etc/apache2/sites-available/000-default.conf
+    notify: reload apache2 service
+
+  - name: start/enable apache2 service
+    service:
+      name: apache2
+      state: started
+      enabled: yes
+
+  handlers:
+  - name: reload apache2 service
+    service:
+      name: apache2
+      state: reloaded
